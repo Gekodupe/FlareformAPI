@@ -20,7 +20,7 @@ export function randomCode(length = 6): string {
 }
 
 export function mintApiKey(): string {
-  return 'gd_live_' + randomToken(16);
+  return 'ff_live_' + randomToken(16);
 }
 
 export function keyPrefix(apiKey: string): string {

@@ -3,6 +3,29 @@ import { jsonResponse } from '../lib/cors.ts';
 import type { Env } from '../lib/env.ts';
 import { readJsonBody } from '../lib/validate.ts';
 
+function orderClause(sort: string, kind: 'form' | 'log'): string {
+  switch (sort) {
+    case 'oldest':
+      return ' ORDER BY s.created_at ASC';
+    case 'project':
+    case 'project_asc':
+      return ' ORDER BY lower(p.name) ASC, s.created_at DESC';
+    case 'project_desc':
+      return ' ORDER BY lower(p.name) DESC, s.created_at DESC';
+    case 'score':
+      return kind === 'form'
+        ? ' ORDER BY s.spam_score DESC, s.created_at DESC'
+        : ' ORDER BY s.occurrence_count DESC, s.created_at DESC';
+    case 'level':
+      return kind === 'log'
+        ? ' ORDER BY lower(coalesce(s.level,\'\')) ASC, s.created_at DESC'
+        : ' ORDER BY s.created_at DESC';
+    case 'newest':
+    default:
+      return ' ORDER BY s.created_at DESC';
+  }
+}
+
 export async function handleInboxRoutes(
   request: Request,
   env: Env,
@@ -18,7 +41,8 @@ export async function handleInboxRoutes(
     const url = new URL(request.url);
     const projectId = (url.searchParams.get('projectId') || '').trim();
     const filter = (url.searchParams.get('filter') || 'all').toLowerCase();
-    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') || 25) || 25));
+    const sort = (url.searchParams.get('sort') || 'newest').toLowerCase();
+    const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') || 25) || 25));
     const offset = Math.max(0, Number(url.searchParams.get('offset') || 0) || 0);
 
     let sql =
@@ -37,7 +61,7 @@ export async function handleInboxRoutes(
     else if (filter === 'ham' || filter === 'inbox') sql += ' AND s.is_spam = 0';
     else if (filter === 'unread') sql += ' AND s.read_at IS NULL';
 
-    sql += ' ORDER BY s.created_at DESC LIMIT ? OFFSET ?';
+    sql += orderClause(sort, 'form') + ' LIMIT ? OFFSET ?';
     binds.push(limit, offset);
 
     const { results } = await env.DB.prepare(sql)
@@ -64,7 +88,7 @@ export async function handleInboxRoutes(
       };
     });
 
-    return jsonResponse({ items, limit, offset }, 200, request, env);
+    return jsonResponse({ items, limit, offset, sort }, 200, request, env);
   }
 
   const match = path.match(/^\/v1\/inbox\/([A-Za-z0-9_]+)$/);

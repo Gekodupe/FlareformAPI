@@ -29,8 +29,8 @@
   "vars": {
     "GECKODUPE_SPAM_URL": "https://geckodupe-spam.nic-58f.workers.dev",
     "SPAM_FAIL_MODE": "fail-open",
-    "APP_ORIGIN": "https://flareform.com",
-    "CORS_ORIGINS": "http://127.0.0.1:4173,http://localhost:4173,https://flareform.com,https://www.flareform.com,https://flareform-api.nic-58f.workers.dev,https://flareboard-api.nic-58f.workers.dev",
+    "APP_ORIGIN": "https://flareform.pages.dev",
+    "CORS_ORIGINS": "http://127.0.0.1:4173,http://localhost:4173,https://flareform.pages.dev,https://flareform.com,https://www.flareform.com,https://flareform-api.nic-58f.workers.dev,https://flareboard-api.nic-58f.workers.dev",
     "BREVO_SENDER_NAME": "Blacnova Development",
     "SUPPORT_INBOX": "nic@blacnova.net"
   }

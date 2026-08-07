@@ -1,7 +1,7 @@
 {
   "name": "@flareform/api",
-  "version": "0.4.0",
-  "description": "Flareform API — Cloudflare Worker for forms, logs, and image ingest",
+  "version": "0.5.0",
+  "description": "Flareform API — Cloudflare Worker for forms, logs, images, and API keys",
   "homepage": "https://github.com/Gekodupe/FlareformAPI",
   "repository": {
     "type": "git",

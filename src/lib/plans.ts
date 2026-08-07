@@ -5,6 +5,7 @@ export interface PlanLimits {
   submissionsPerMonth: number;
   imagesPerMonth: number;
   maxImageBytes: number;
+  maxKeys: number;
 }
 
 export interface PlanInfo {
@@ -22,7 +23,13 @@ export const PLANS: Record<PlanId, PlanInfo> = {
     name: 'Guest',
     priceMonthly: 0,
     blurb: 'Sign in to create projects and receive submissions.',
-    limits: { maxProjects: 0, submissionsPerMonth: 0, imagesPerMonth: 0, maxImageBytes: 0 },
+    limits: {
+      maxProjects: 0,
+      submissionsPerMonth: 0,
+      imagesPerMonth: 0,
+      maxImageBytes: 0,
+      maxKeys: 0
+    },
     features: ['Browse the Flareform UI']
   },
   free: {
@@ -34,14 +41,15 @@ export const PLANS: Record<PlanId, PlanInfo> = {
       maxProjects: 3,
       submissionsPerMonth: 1000,
       imagesPerMonth: 50,
-      maxImageBytes: 2 * 1024 * 1024
+      maxImageBytes: 2 * 1024 * 1024,
+      maxKeys: 2
     },
     features: [
       '3 projects',
       '1k forms+logs / month',
       '50 images / month',
-      'Inbox + logs + analytics',
-      'Spam scoring'
+      '2 API keys',
+      'Inbox + logs + analytics'
     ]
   },
   starter: {
@@ -53,14 +61,15 @@ export const PLANS: Record<PlanId, PlanInfo> = {
       maxProjects: 15,
       submissionsPerMonth: 25000,
       imagesPerMonth: 2000,
-      maxImageBytes: 2 * 1024 * 1024
+      maxImageBytes: 2 * 1024 * 1024,
+      maxKeys: 5
     },
     features: [
       '15 projects',
       '25k forms+logs / month',
       '2k images / month',
-      'Priority email support',
-      'Stripe billing portal'
+      '5 API keys',
+      'Priority email support'
     ]
   },
   pro: {
@@ -72,13 +81,14 @@ export const PLANS: Record<PlanId, PlanInfo> = {
       maxProjects: 100,
       submissionsPerMonth: 200000,
       imagesPerMonth: 20000,
-      maxImageBytes: 2 * 1024 * 1024
+      maxImageBytes: 2 * 1024 * 1024,
+      maxKeys: 10
     },
     features: [
       '100 projects',
       '200k forms+logs / month',
       '20k images / month',
-      'Highest limits',
+      '10 API keys',
       'Priority support'
     ]
   }

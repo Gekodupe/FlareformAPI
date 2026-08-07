@@ -34,17 +34,26 @@ export async function handleProjectRoutes(
   const email = session.email;
 
   if (path === '/v1/projects' && request.method === 'GET') {
+    const url = new URL(request.url);
+    const sort = (url.searchParams.get('sort') || 'newest').toLowerCase();
+    let orderBy = 'created_at DESC';
+    if (sort === 'name' || sort === 'project') orderBy = 'lower(name) ASC';
+    else if (sort === 'oldest') orderBy = 'created_at ASC';
+    else if (sort === 'submissions' || sort === 'volume') {
+      orderBy = 'submission_count DESC, created_at DESC';
+    }
+
     const { results } = await env.DB.prepare(
       `SELECT id, name, allowed_origins, turnstile_enabled, notify_email, notify_enabled, logs_enabled,
               created_at, updated_at,
         (SELECT COUNT(*) FROM submissions s WHERE s.project_id = projects.id AND coalesce(s.kind,'form') = 'form') AS submission_count,
         (SELECT COUNT(*) FROM submissions s WHERE s.project_id = projects.id AND coalesce(s.kind,'form') = 'form' AND s.is_spam = 1) AS spam_count,
         (SELECT COUNT(*) FROM submissions s WHERE s.project_id = projects.id AND s.kind = 'log') AS log_count
-       FROM projects WHERE owner_email = ? ORDER BY created_at DESC`
+       FROM projects WHERE owner_email = ? ORDER BY ${orderBy}`
     )
       .bind(email)
       .all();
-    return jsonResponse({ projects: results || [] }, 200, request, env);
+    return jsonResponse({ projects: results || [], sort }, 200, request, env);
   }
 
   if (path === '/v1/projects' && request.method === 'POST') {

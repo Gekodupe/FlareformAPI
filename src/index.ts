@@ -32,7 +32,7 @@ export default {
           {
             ok: true,
             service: 'flareform-api',
-            version: '0.4.0',
+            version: '0.5.0',
             time: new Date().toISOString(),
             emailConfigured: !!env.BREVO_API_KEY,
             spamConfigured: !!env.GECKODUPE_SPAM_URL,
@@ -78,7 +78,7 @@ export default {
       return jsonResponse(
         {
           error: 'Not found',
-          hint: 'Try GET /v1/health, /v1/auth/*, /v1/account, /v1/billing/*, /v1/projects, /v1/inbox, /v1/logs, /v1/analytics, GET /v1/files/{id}, POST /v1/support, POST /f/{projectId}, or POST /l/{projectId}'
+          hint: 'Try GET /v1/health, /v1/auth/*, /v1/account, /v1/account/keys, /v1/billing/*, /v1/projects, /v1/inbox, /v1/logs, /v1/analytics, GET /v1/files/{id}, POST /v1/support, POST /f/{projectId}, or POST /l/{projectId}'
         },
         404,
         request,
