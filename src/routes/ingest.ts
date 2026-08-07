@@ -52,7 +52,7 @@ async function notifyOwner(
     })
     .join('');
 
-  const subject = 'New Flareform submission — ' + String(project.name || project.id);
+  const subject = 'New Flareform submission - ' + String(project.name || project.id);
   const html =
     '<div style="font-family:Poppins,Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a">' +
     '<p style="color:#f7831e;text-transform:uppercase;letter-spacing:0.08em;font-size:13px">Flareform</p>' +
@@ -465,7 +465,7 @@ async function handleLogIngest(
     .first<{ id: string; occurrence_count: number }>();
 
   if (existing) {
-    // Bump duplicate by fingerprint — does not consume extra quota
+    // Bump duplicate by fingerprint - does not consume extra quota
     const nextCount = Number(existing.occurrence_count || 1) + 1;
     await env.DB.prepare(
       `UPDATE submissions SET occurrence_count = ?, created_at = datetime('now'),

@@ -1,4 +1,4 @@
-# Flareform API local secrets — copy to worker/.dev.vars
+# Flareform API local secrets - copy to worker/.dev.vars
 APP_ORIGIN=http://127.0.0.1:4173
 CORS_ORIGINS=http://127.0.0.1:4173,http://localhost:4173
 SPAM_FAIL_MODE=fail-open

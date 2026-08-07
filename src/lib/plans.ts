@@ -99,8 +99,8 @@ export const PUBLIC_PLAN_IDS: PlanId[] = ['free', 'starter', 'pro'];
 export function parsePriceIds(raw: string | undefined): Record<string, string> {
   const defaults = {
     free: '',
-    starter: 'price_1U1dxXGrsdJU1djqpVvONZKS',
-    pro: 'price_1U1dxZGrsdJU1djqZaZ3dTdL'
+    starter: 'price_1U1u6hGrsdJU1djqgYmoylSp',
+    pro: 'price_1U1u6jGrsdJU1djqyssrZ6Od'
   };
   if (!raw) return defaults;
   try {

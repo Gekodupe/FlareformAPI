@@ -61,7 +61,7 @@ export async function handleSupportRoutes(
 
   const mailed = await sendBrevoEmail(env, {
     to: inbox,
-    subject: '[Flareform] ' + topicLabel + ' — ' + name,
+    subject: '[Flareform] ' + topicLabel + ' - ' + name,
     html,
     text:
       'From: ' +
