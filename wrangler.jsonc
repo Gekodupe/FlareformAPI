@@ -1,0 +1,37 @@
+/**
+ * Flareform API Worker
+ */
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "flareform-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "FLAREFORM",
+      "id": "88853b2620834f15ad828f391a790195",
+      "preview_id": "1220c23b5c674c72b6ba677f4d91fbf6"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "flareboard",
+      "database_id": "3b840410-3adb-41c2-8e90-4b8fcb039349",
+      "preview_database_id": "local-DB"
+    }
+  ],
+  "vars": {
+    "GECKODUPE_SPAM_URL": "https://geckodupe-spam.nic-58f.workers.dev",
+    "SPAM_FAIL_MODE": "fail-open",
+    "APP_ORIGIN": "https://flareform.com",
+    "CORS_ORIGINS": "http://127.0.0.1:4173,http://localhost:4173,https://flareform.com,https://www.flareform.com,https://flareform-api.nic-58f.workers.dev,https://flareboard-api.nic-58f.workers.dev",
+    "BREVO_SENDER_NAME": "Blacnova Development",
+    "SUPPORT_INBOX": "nic@blacnova.net"
+  }
+}

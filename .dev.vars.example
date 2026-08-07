@@ -1,0 +1,14 @@
+# Flareform API local secrets — copy to worker/.dev.vars
+APP_ORIGIN=http://127.0.0.1:4173
+CORS_ORIGINS=http://127.0.0.1:4173,http://localhost:4173
+SPAM_FAIL_MODE=fail-open
+GECKODUPE_SPAM_URL=https://geckodupe-spam.nic-58f.workers.dev
+# GECKODUPE_API_KEY=   # Bearer key for spam/dedupe API (optional; local heuristic used if missing)
+# BREVO_API_KEY=
+# BREVO_SENDER_EMAIL=nic@blacnova.net
+# BREVO_SENDER_NAME=Flareform
+# SUPPORT_INBOX=nic@blacnova.net
+# STRIPE_SECRET_KEY=
+# STRIPE_WEBHOOK_SECRET=
+# STRIPE_PRICE_IDS={"starter":"price_1U1dxXGrsdJU1djqpVvONZKS","pro":"price_1U1dxZGrsdJU1djqZaZ3dTdL"}
+# TURNSTILE_SECRET=
