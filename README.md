@@ -32,4 +32,4 @@ See frontend **Docs → API reference** for the full surface.
 
 ## License
 
-MIT
+MIT — see [LICENSE](./LICENSE).
