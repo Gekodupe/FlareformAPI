@@ -1,10 +1,8 @@
 # Flareform API
 
-Open-source Cloudflare Worker powering [Flareform](https://github.com/Gekodupe/Flareform) - Formspree-style form ingest, error logs, inbox, billing, and image uploads.
+Open-source Cloudflare Worker powering [Flareform](https://github.com/Gekodupe/Flareform): Formspree-style form ingest, error logs, inbox, billing, and image uploads.
 
 Optional edge spam/dedupe via [GeckodupeAPI](https://github.com/Gekodupe/GeckodupeAPI) (`GECKODUPE_SPAM_URL` / `GECKODUPE_API_KEY`).
-
-**Repo:** [Gekodupe/FlareformAPI](https://github.com/Gekodupe/FlareformAPI) · **Org:** [Gekodupe](https://github.com/orgs/Gekodupe)
 
 ## Deploy
 
@@ -32,4 +30,4 @@ See frontend **Docs → API reference** for the full surface.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](./LICENSE).
