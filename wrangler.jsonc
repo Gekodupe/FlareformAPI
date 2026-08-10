@@ -26,6 +26,16 @@
       "preview_database_id": "local-DB"
     }
   ],
+  "ratelimits": [
+    {
+      "name": "SPAM_RATE_LIMITER",
+      "namespace_id": "1002",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ],
   "vars": {
     "GECKODUPE_SPAM_URL": "https://geckodupe-spam.nic-58f.workers.dev",
     "SPAM_FAIL_MODE": "fail-open",

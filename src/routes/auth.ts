@@ -7,6 +7,7 @@ import { hashPassword, passwordStrengthOk, verifyPassword } from '../lib/passwor
 import { getUser, putUser, userPlan } from '../lib/users.ts';
 import { PLANS } from '../lib/plans.ts';
 import { readJsonBody } from '../lib/validate.ts';
+import { clientIp, rateOk } from '../lib/rate-limit.ts';
 
 const MAGIC_TTL_SEC = 15 * 60;
 const VERIFY_TTL_SEC = 24 * 60 * 60;
@@ -16,17 +17,6 @@ const SESSION_LONG_SEC = 30 * 24 * 60 * 60;
 
 function appOrigin(env: Env): string {
   return (env.APP_ORIGIN || 'https://flareform.com').replace(/\/+$/, '');
-}
-
-async function rateOk(env: Env, key: string): Promise<boolean> {
-  if (!env.SPAM_RATE_LIMITER) return true;
-  try {
-    const r = await env.SPAM_RATE_LIMITER.limit({ key });
-    return r.success;
-  } catch {
-    // Fail open if the limiter binding errors - do not lock out all auth
-    return true;
-  }
 }
 
 async function createSession(
@@ -60,7 +50,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   if (!path.startsWith('/v1/auth/')) return null;
 
   if (path === '/v1/auth/register' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-reg:' + (request.headers.get('CF-Connecting-IP') || 'x')))) {
+    if (!(await rateOk(env, 'auth-reg:' + (clientIp(request))))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
     const parsed = await readJsonBody(request, 8 * 1024);
@@ -129,7 +119,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/login' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-login:' + (request.headers.get('CF-Connecting-IP') || 'x')))) {
+    if (!(await rateOk(env, 'auth-login:' + (clientIp(request))))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
     const parsed = await readJsonBody(request, 8 * 1024);
@@ -162,7 +152,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/forgot' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-forgot:' + (request.headers.get('CF-Connecting-IP') || 'x')))) {
+    if (!(await rateOk(env, 'auth-forgot:' + (clientIp(request))))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
     const parsed = await readJsonBody(request, 8 * 1024);
@@ -237,7 +227,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/start' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-start:' + (request.headers.get('CF-Connecting-IP') || 'x')))) {
+    if (!(await rateOk(env, 'auth-start:' + (clientIp(request))))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
 
@@ -300,7 +290,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/verify' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-verify:' + (request.headers.get('CF-Connecting-IP') || 'x')))) {
+    if (!(await rateOk(env, 'auth-verify:' + (clientIp(request))))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
 

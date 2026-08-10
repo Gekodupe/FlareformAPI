@@ -12,13 +12,14 @@ import {
   MAX_IMAGES_PER_SUBMISSION,
   storeImageFile
 } from '../lib/media.ts';
-
-function parseAllowedOrigins(raw: string): string[] {
-  return String(raw || '')
-    .split(/[,\n]+/)
-    .map((s) => s.trim().replace(/\/+$/, ''))
-    .filter(Boolean);
-}
+import {
+  assertIngestBodySize,
+  MAX_INGEST_JSON_BYTES,
+  MAX_INGEST_MULTIPART_BYTES,
+  originDenied,
+  safeRedirectUrl
+} from '../lib/ingest-guard.ts';
+import { clientIp, rateOk } from '../lib/rate-limit.ts';
 
 function escapeHtml(s: string): string {
   return String(s)
@@ -88,9 +89,21 @@ async function notifyOwner(
 async function parseBody(
   request: Request
 ): Promise<{ fields: Record<string, unknown>; files: Array<{ name: string; field: string; contentType: string; bytes: ArrayBuffer }> }> {
+  const size = assertIngestBodySize(request);
+  if (!size.ok) {
+    const err = new Error(size.error) as Error & { status: number };
+    err.status = size.status;
+    throw err;
+  }
+
   const ct = (request.headers.get('Content-Type') || '').toLowerCase();
   if (ct.includes('application/json')) {
     const text = await request.text();
+    if (text.length > MAX_INGEST_JSON_BYTES) {
+      const err = new Error('Payload too large') as Error & { status: number };
+      err.status = 413;
+      throw err;
+    }
     if (!text.trim()) return { fields: {}, files: [] };
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -102,12 +115,28 @@ async function parseBody(
     const form = await request.formData();
     const fields: Record<string, unknown> = {};
     const files: Array<{ name: string; field: string; contentType: string; bytes: ArrayBuffer }> = [];
+    let totalBytes = 0;
+    const maxBytes = ct.includes('multipart/form-data')
+      ? MAX_INGEST_MULTIPART_BYTES
+      : MAX_INGEST_JSON_BYTES;
     for (const [key, value] of form.entries()) {
       if (typeof value === 'string') {
+        totalBytes += value.length;
+        if (totalBytes > maxBytes) {
+          const err = new Error('Payload too large') as Error & { status: number };
+          err.status = 413;
+          throw err;
+        }
         fields[key] = value;
       } else {
         const file = value as File;
         const bytes = await file.arrayBuffer();
+        totalBytes += bytes.byteLength;
+        if (totalBytes > maxBytes) {
+          const err = new Error('Payload too large') as Error & { status: number };
+          err.status = 413;
+          throw err;
+        }
         files.push({
           name: file.name || 'upload',
           field: key,
@@ -119,6 +148,11 @@ async function parseBody(
     return { fields, files };
   }
   const text = await request.text();
+  if (text.length > MAX_INGEST_JSON_BYTES) {
+    const err = new Error('Payload too large') as Error & { status: number };
+    err.status = 413;
+    throw err;
+  }
   if (!text.trim()) return { fields: {}, files: [] };
   try {
     const parsed = JSON.parse(text);
@@ -149,19 +183,15 @@ async function checkOrigin(
   request: Request,
   env: Env
 ): Promise<Response | null> {
-  const origin = request.headers.get('Origin') || '';
-  const allowed = parseAllowedOrigins(project.allowed_origins || '');
-  if (allowed.length && origin) {
-    const ok = allowed.some((a) => a === origin || a === '*');
-    if (!ok) {
-      return jsonResponse(
-        { error: 'Origin not allowed' },
-        403,
-        request,
-        env,
-        ingestCorsHeaders(request)
-      );
-    }
+  const result = originDenied(project.allowed_origins || '', request);
+  if (result.denied) {
+    return jsonResponse(
+      { error: result.error },
+      403,
+      request,
+      env,
+      ingestCorsHeaders(request)
+    );
   }
   return null;
 }
@@ -211,10 +241,11 @@ async function handleFormIngest(
   };
   try {
     parsedBody = await parseBody(request);
-  } catch {
+  } catch (e: any) {
+    const status = Number(e && e.status) || 400;
     return jsonResponse(
-      { error: 'Invalid body' },
-      400,
+      { error: (e && e.message) || 'Invalid body' },
+      status,
       request,
       env,
       ingestCorsHeaders(request)
@@ -232,7 +263,7 @@ async function handleFormIngest(
       fields['cf-turnstile-response'] || fields.turnstileToken || fields._turnstile || ''
     );
     const ip = request.headers.get('CF-Connecting-IP');
-    const ts = await verifyTurnstile(token, env.TURNSTILE_SECRET, ip);
+    const ts = await verifyTurnstile(token, env.TURNSTILE_SECRET, ip, { required: true });
     if (!ts.ok) {
       return jsonResponse(
         { error: 'Turnstile verification failed', reason: ts.reason },
@@ -362,10 +393,17 @@ async function handleFormIngest(
   const wantsHtml =
     (request.headers.get('Accept') || '').includes('text/html') ||
     (request.headers.get('Content-Type') || '').includes('application/x-www-form-urlencoded');
-  if (next && /^https?:\/\//i.test(next) && wantsHtml) {
-    const headers = new Headers(ingestCorsHeaders(request));
-    headers.set('Location', next);
-    return new Response(null, { status: 303, headers });
+  if (next && wantsHtml) {
+    const safe = safeRedirectUrl(next, {
+      allowedOriginsRaw: String(project.allowed_origins || ''),
+      requestOrigin: request.headers.get('Origin') || '',
+      appOrigin: env.APP_ORIGIN || 'https://flareform.pages.dev'
+    });
+    if (safe) {
+      const headers = new Headers(ingestCorsHeaders(request));
+      headers.set('Location', safe);
+      return new Response(null, { status: 303, headers });
+    }
   }
 
   return jsonResponse(
@@ -405,10 +443,11 @@ async function handleLogIngest(
   let fields: Record<string, unknown>;
   try {
     fields = (await parseBody(request)).fields;
-  } catch {
+  } catch (e: any) {
+    const status = Number(e && e.status) || 400;
     return jsonResponse(
-      { error: 'Invalid body' },
-      400,
+      { error: (e && e.message) || 'Invalid body' },
+      status,
       request,
       env,
       ingestCorsHeaders(request)
@@ -549,6 +588,16 @@ export async function handleIngestRoutes(
   }
 
   const projectId = (logMatch || formMatch)![1];
+  if (!(await rateOk(env, 'ingest:' + clientIp(request) + ':' + projectId))) {
+    return jsonResponse(
+      { error: 'Too many requests' },
+      429,
+      request,
+      env,
+      ingestCorsHeaders(request)
+    );
+  }
+
   const project = await env.DB.prepare('SELECT * FROM projects WHERE id = ?')
     .bind(projectId)
     .first<any>();

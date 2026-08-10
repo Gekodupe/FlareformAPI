@@ -3,6 +3,7 @@ import { sendBrevoEmail } from '../lib/brevo.ts';
 import type { Env } from '../lib/env.ts';
 import { normalizeEmail } from '../lib/auth.ts';
 import { readJsonBody } from '../lib/validate.ts';
+import { clientIp, rateOk } from '../lib/rate-limit.ts';
 
 const TOPICS: Record<string, string> = {
   billing: 'Billing and plans',
@@ -23,6 +24,10 @@ export async function handleSupportRoutes(
 ): Promise<Response | null> {
   if (path !== '/v1/support' || request.method !== 'POST') return null;
 
+  if (!(await rateOk(env, 'support:' + clientIp(request)))) {
+    return jsonResponse({ error: 'Too many requests' }, 429, request, env);
+  }
+
   const parsed = await readJsonBody(request, 16 * 1024);
   if (!parsed.ok) return jsonResponse({ error: parsed.error }, parsed.status, request, env);
 
@@ -40,6 +45,10 @@ export async function handleSupportRoutes(
   if (!TOPICS[topic]) return jsonResponse({ error: 'Select a topic' }, 400, request, env);
   if (message.length < 10) {
     return jsonResponse({ error: 'Message too short' }, 400, request, env);
+  }
+
+  if (!(await rateOk(env, 'support-email:' + email))) {
+    return jsonResponse({ error: 'Too many requests' }, 429, request, env);
   }
 
   const inbox = env.SUPPORT_INBOX || env.BREVO_SENDER_EMAIL || 'nic@blacnova.net';
@@ -76,15 +85,13 @@ export async function handleSupportRoutes(
   });
 
   if (!mailed.ok) {
-    // Still accept locally when email is not configured so UI can be tested
     if (!env.BREVO_API_KEY) {
       return jsonResponse(
         {
-          ok: true,
-          queued: false,
-          message: 'Support request recorded. Email delivery is not configured on this deployment.'
+          ok: false,
+          error: 'Support email is not configured on this deployment.'
         },
-        200,
+        503,
         request,
         env
       );
