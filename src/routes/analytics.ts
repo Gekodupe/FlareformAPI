@@ -84,7 +84,7 @@ export async function handleAnalyticsRoutes(
   return jsonResponse(
     {
       totals: {
-        submissions: Number(totals?.forms || 0),
+        submissions: Number(totals?.total || 0),
         forms: Number(totals?.forms || 0),
         logs: Number(totals?.logs || 0),
         spam: Number(totals?.spam || 0),

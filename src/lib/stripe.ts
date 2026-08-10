@@ -26,7 +26,10 @@ export async function stripeRequest(
     },
     body: body ? formEncode(body) : undefined
   });
-  const data = await res.json().catch(() => ({}));
+  const data = (await res.json().catch(() => ({}))) as {
+    error?: { message?: string };
+    [key: string]: unknown;
+  };
   if (!res.ok) {
     return {
       ok: false,

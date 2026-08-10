@@ -7,6 +7,7 @@ import { readJsonBody } from '../lib/validate.ts';
 const TOPICS: Record<string, string> = {
   billing: 'Billing and plans',
   inbox: 'Inbox and submissions',
+  logs: 'Error logs',
   projects: 'Projects and ingest',
   analytics: 'Analytics',
   account: 'Account and sign-in',
