@@ -98,12 +98,13 @@ export function safeRedirectUrl(
 
   let absolute: URL;
   if (next.startsWith('/') && !next.startsWith('//')) {
-    const base =
-      (opts.requestOrigin && originMatches(allowed.length ? allowed : fallbackBases, opts.requestOrigin)
-        ? opts.requestOrigin
-        : null) ||
-      (allowed[0] && allowed[0] !== '*' ? allowed[0] : null) ||
-      fallbackBases[0];
+    let base: string | null = null;
+    if (opts.requestOrigin) {
+      const reqOk = allowed.length ? originMatches(allowed, opts.requestOrigin) : true;
+      if (reqOk) base = opts.requestOrigin;
+    }
+    if (!base && allowed[0] && allowed[0] !== '*') base = allowed[0];
+    if (!base) base = fallbackBases[0] || null;
     if (!base) return null;
     try {
       absolute = new URL(next, base.endsWith('/') ? base : base + '/');

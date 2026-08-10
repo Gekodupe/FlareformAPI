@@ -50,7 +50,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   if (!path.startsWith('/v1/auth/')) return null;
 
   if (path === '/v1/auth/register' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-reg:' + (clientIp(request))))) {
+    if (!(await rateOk(env, 'auth-reg:' + clientIp(request)))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
     const parsed = await readJsonBody(request, 8 * 1024);
@@ -119,7 +119,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/login' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-login:' + (clientIp(request))))) {
+    if (!(await rateOk(env, 'auth-login:' + clientIp(request)))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
     const parsed = await readJsonBody(request, 8 * 1024);
@@ -152,7 +152,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/forgot' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-forgot:' + (clientIp(request))))) {
+    if (!(await rateOk(env, 'auth-forgot:' + clientIp(request)))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
     const parsed = await readJsonBody(request, 8 * 1024);
@@ -227,7 +227,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/start' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-start:' + (clientIp(request))))) {
+    if (!(await rateOk(env, 'auth-start:' + clientIp(request)))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
 
@@ -290,7 +290,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/verify' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-verify:' + (clientIp(request))))) {
+    if (!(await rateOk(env, 'auth-verify:' + clientIp(request)))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
 
