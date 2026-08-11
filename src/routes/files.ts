@@ -1,5 +1,7 @@
 import { jsonResponse, ingestCorsHeaders } from '../lib/cors.ts';
 import type { Env } from '../lib/env.ts';
+import { requireSession } from '../lib/auth.ts';
+import type { StoredFileMeta } from '../lib/media.ts';
 
 export async function handleFileRoutes(
   request: Request,
@@ -17,21 +19,37 @@ export async function handleFileRoutes(
   }
 
   const id = match[1];
-  const meta = (await env.FLAREFORM.get('filemeta:' + id, 'json')) as {
-    contentType?: string;
-    name?: string;
-    size?: number;
-  } | null;
+  const meta = (await env.FLAREFORM.get('filemeta:' + id, 'json')) as StoredFileMeta | null;
   if (!meta) return jsonResponse({ error: 'Not found' }, 404, request, env);
+
+  const url = new URL(request.url);
+  const token = (url.searchParams.get('t') || url.searchParams.get('token') || '').trim();
+  let allowed = false;
+
+  if (meta.token && token && token === meta.token) {
+    allowed = true;
+  } else {
+    const session = await requireSession(request, env);
+    if (session.ok && session.email === String(meta.ownerEmail || '').toLowerCase()) {
+      allowed = true;
+    }
+  }
+
+  if (!allowed) {
+    // 404 to avoid confirming file existence to strangers
+    return jsonResponse({ error: 'Not found' }, 404, request, env);
+  }
 
   const bytes = await env.FLAREFORM.get('file:' + id, 'arrayBuffer');
   if (!bytes) return jsonResponse({ error: 'Not found' }, 404, request, env);
 
   const headers = new Headers(ingestCorsHeaders(request));
   headers.set('Content-Type', meta.contentType || 'application/octet-stream');
-  headers.set('Cache-Control', 'public, max-age=86400');
+  headers.set('Cache-Control', 'private, max-age=3600');
+  headers.set('X-Content-Type-Options', 'nosniff');
   if (meta.name) {
-    headers.set('Content-Disposition', 'inline; filename="' + meta.name.replace(/"/g, '') + '"');
+    const safe = String(meta.name).replace(/["\r\n\\]/g, '');
+    headers.set('Content-Disposition', 'inline; filename="' + safe + '"');
   }
   if (request.method === 'HEAD') {
     headers.set('Content-Length', String(meta.size || bytes.byteLength));

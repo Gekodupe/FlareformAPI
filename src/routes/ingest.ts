@@ -327,23 +327,36 @@ async function handleFormIngest(
     size: number;
     contentType: string;
     field: string;
+    token: string;
   }> = [];
   const originHost = new URL(request.url).origin;
   for (const f of imageFiles) {
-    const stored = await storeImageFile(env, {
-      projectId,
-      ownerEmail: owner,
-      name: f.name,
-      contentType: f.contentType,
-      bytes: f.bytes
-    });
+    let stored: Awaited<ReturnType<typeof storeImageFile>>;
+    try {
+      stored = await storeImageFile(env, {
+        projectId,
+        ownerEmail: owner,
+        name: f.name,
+        contentType: f.contentType,
+        bytes: f.bytes
+      });
+    } catch (err: any) {
+      return jsonResponse(
+        { error: (err && err.message) || 'Invalid image', name: f.name },
+        Number(err && err.status) || 400,
+        request,
+        env,
+        ingestCorsHeaders(request)
+      );
+    }
     storedImages.push({
       id: stored.id,
       url: originHost + stored.urlPath,
       name: stored.name,
       size: stored.size,
       contentType: stored.contentType,
-      field: f.field
+      field: f.field,
+      token: stored.token
     });
   }
   if (storedImages.length) {

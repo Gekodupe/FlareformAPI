@@ -19,10 +19,62 @@ export type StoredFileMeta = {
   size: number;
   name: string;
   createdAt: number;
+  /** Unguessable read token required for unauthenticated GET */
+  token: string;
 };
 
+/** Detect real image type from magic bytes (ignore client Content-Type alone). */
+export function sniffImageType(bytes: ArrayBuffer): string | null {
+  const u = new Uint8Array(bytes);
+  if (u.length >= 3 && u[0] === 0xff && u[1] === 0xd8 && u[2] === 0xff) return 'image/jpeg';
+  if (
+    u.length >= 8 &&
+    u[0] === 0x89 &&
+    u[1] === 0x50 &&
+    u[2] === 0x4e &&
+    u[3] === 0x47 &&
+    u[4] === 0x0d &&
+    u[5] === 0x0a &&
+    u[6] === 0x1a &&
+    u[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  if (u.length >= 6 && u[0] === 0x47 && u[1] === 0x49 && u[2] === 0x46 && u[3] === 0x38) {
+    return 'image/gif';
+  }
+  if (
+    u.length >= 12 &&
+    u[0] === 0x52 &&
+    u[1] === 0x49 &&
+    u[2] === 0x46 &&
+    u[3] === 0x46 &&
+    u[8] === 0x57 &&
+    u[9] === 0x45 &&
+    u[10] === 0x42 &&
+    u[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+  return null;
+}
+
 export function isAllowedImageType(ct: string): boolean {
-  return ALLOWED_IMAGE_TYPES.has(String(ct || '').toLowerCase());
+  const t = String(ct || '').toLowerCase();
+  if (t === 'image/jpg') return true;
+  return ALLOWED_IMAGE_TYPES.has(t);
+}
+
+export function sanitizeFileName(name: string): string {
+  return (
+    String(name || 'upload')
+      .replace(/[\\/\r\n\0]+/g, '_')
+      .replace(/\.\.+/g, '')
+      .replace(/^[_\s]+|[_\s]+$/g, '')
+      .replace(/[^\w.\-()+ ]+/g, '')
+      .trim()
+      .slice(0, 180) || 'upload'
+  );
 }
 
 export async function storeImageFile(
@@ -34,16 +86,29 @@ export async function storeImageFile(
     contentType: string;
     bytes: ArrayBuffer;
   }
-): Promise<{ id: string; urlPath: string; size: number; name: string; contentType: string }> {
+): Promise<{
+  id: string;
+  urlPath: string;
+  size: number;
+  name: string;
+  contentType: string;
+  token: string;
+}> {
+  const sniffed = sniffImageType(opts.bytes);
+  if (!sniffed || !isAllowedImageType(sniffed)) {
+    throw Object.assign(new Error('Invalid image data'), { status: 400, code: 'invalid_image' });
+  }
   const id = 'img_' + randomToken(12);
+  const token = randomToken(24);
   const meta: StoredFileMeta = {
     id,
     projectId: opts.projectId,
     ownerEmail: opts.ownerEmail,
-    contentType: opts.contentType,
+    contentType: sniffed,
     size: opts.bytes.byteLength,
-    name: opts.name.slice(0, 180),
-    createdAt: Date.now()
+    name: sanitizeFileName(opts.name),
+    createdAt: Date.now(),
+    token
   };
   await env.FLAREFORM.put('filemeta:' + id, JSON.stringify(meta), {
     expirationTtl: 60 * 60 * 24 * 365
@@ -53,10 +118,11 @@ export async function storeImageFile(
   });
   return {
     id,
-    urlPath: '/v1/files/' + id,
+    urlPath: '/v1/files/' + id + '?t=' + encodeURIComponent(token),
     size: meta.size,
     name: meta.name,
-    contentType: meta.contentType
+    contentType: meta.contentType,
+    token
   };
 }
 

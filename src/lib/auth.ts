@@ -1,5 +1,6 @@
 import type { Env } from './env.ts';
 import { sha256Hex } from './crypto-util.ts';
+import { getUser } from './users.ts';
 
 export function extractBearerToken(request: Request): string {
   const auth = request.headers.get('Authorization') || '';
@@ -49,6 +50,26 @@ export async function requireSession(request: Request, env: Env): Promise<Sessio
   }
 
   return { ok: false, error: 'Sign in required' };
+}
+
+export type VerifiedOk = { ok: true; user: any };
+export type VerifiedFail = { ok: false; error: string; code: string; status: number };
+
+/** Require verified email for mutating hosted features (projects, billing, keys). */
+export async function requireVerifiedEmail(
+  env: Env,
+  email: string
+): Promise<VerifiedOk | VerifiedFail> {
+  const user = await getUser(env, email);
+  if (!user || !user.emailVerified) {
+    return {
+      ok: false,
+      error: 'Verify your email to continue.',
+      code: 'email_unverified',
+      status: 403
+    };
+  }
+  return { ok: true, user };
 }
 
 export function normalizeEmail(email: string): string | null {

@@ -1,4 +1,4 @@
-import { requireSession } from '../lib/auth.ts';
+import { requireSession, requireVerifiedEmail } from '../lib/auth.ts';
 import { jsonResponse } from '../lib/cors.ts';
 import { keyPrefix, mintApiKey, randomToken, sha256Hex } from '../lib/crypto-util.ts';
 import type { Env } from '../lib/env.ts';
@@ -132,10 +132,11 @@ export async function handleAccountRoutes(
         env
       );
     }
-    if (!user.emailVerified) {
+    const verified = await requireVerifiedEmail(env, email);
+    if (!verified.ok) {
       return jsonResponse(
-        { error: 'Verify your email before creating API keys.', code: 'email_unverified' },
-        403,
+        { error: verified.error, code: verified.code },
+        verified.status,
         request,
         env
       );

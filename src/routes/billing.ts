@@ -1,4 +1,4 @@
-import { requireSession } from '../lib/auth.ts';
+import { requireSession, requireVerifiedEmail } from '../lib/auth.ts';
 import { jsonResponse } from '../lib/cors.ts';
 import type { Env } from '../lib/env.ts';
 import { PLANS, PUBLIC_PLAN_IDS, planFromPriceId, type PlanId } from '../lib/plans.ts';
@@ -157,6 +157,17 @@ export async function handleBillingRoutes(
   };
 
   if (path === '/v1/billing/checkout' && request.method === 'POST') {
+    const verified = await requireVerifiedEmail(env, email);
+    if (!verified.ok) {
+      return jsonResponse(
+        { error: verified.error, code: verified.code },
+        verified.status,
+        request,
+        env
+      );
+    }
+    user = verified.user;
+
     const parsed = await readJsonBody(request, 8 * 1024);
     if (!parsed.ok) return jsonResponse({ error: parsed.error }, parsed.status, request, env);
     const plan = String(parsed.body.plan || '');
@@ -209,7 +220,16 @@ export async function handleBillingRoutes(
   }
 
   if (path === '/v1/billing/portal' && request.method === 'POST') {
-    user = (await getUser(env, email)) || user;
+    const verified = await requireVerifiedEmail(env, email);
+    if (!verified.ok) {
+      return jsonResponse(
+        { error: verified.error, code: verified.code },
+        verified.status,
+        request,
+        env
+      );
+    }
+    user = verified.user;
     if (!env.STRIPE_SECRET_KEY) {
       return jsonResponse({ error: 'Stripe not configured' }, 503, request, env);
     }

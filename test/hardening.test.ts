@@ -8,6 +8,7 @@ import {
   safeRedirectUrl
 } from '../src/lib/ingest-guard.ts';
 import { verifyTurnstile } from '../src/lib/turnstile.ts';
+import { sanitizeFileName, sniffImageType } from '../src/lib/media.ts';
 
 describe('validate', () => {
   it('parses json body', async () => {
@@ -146,5 +147,20 @@ describe('turnstile', () => {
     const r = await verifyTurnstile('', 'sec', null, { required: true });
     assert.equal(r.ok, false);
     assert.equal(r.reason, 'missing_turnstile');
+  });
+});
+
+describe('media', () => {
+  it('sniffs jpeg/png magic bytes', () => {
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0]).buffer;
+    assert.equal(sniffImageType(jpeg), 'image/jpeg');
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).buffer;
+    assert.equal(sniffImageType(png), 'image/png');
+    assert.equal(sniffImageType(new Uint8Array([1, 2, 3]).buffer), null);
+  });
+
+  it('sanitizes file names', () => {
+    assert.equal(sanitizeFileName('../../etc/passwd'), 'etc_passwd');
+    assert.equal(sanitizeFileName('photo.png'), 'photo.png');
   });
 });

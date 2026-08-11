@@ -1,11 +1,10 @@
-import { requireSession } from '../lib/auth.ts';
+import { requireSession, requireVerifiedEmail, normalizeEmail } from '../lib/auth.ts';
 import { jsonResponse } from '../lib/cors.ts';
 import { randomToken } from '../lib/crypto-util.ts';
 import type { Env } from '../lib/env.ts';
 import { planLimits, getUser, userPlan } from '../lib/users.ts';
 import { PLANS } from '../lib/plans.ts';
 import { readJsonBody } from '../lib/validate.ts';
-import { normalizeEmail } from '../lib/auth.ts';
 
 function projectId(): string {
   return 'prj_' + randomToken(10);
@@ -57,12 +56,22 @@ export async function handleProjectRoutes(
   }
 
   if (path === '/v1/projects' && request.method === 'POST') {
+    const verified = await requireVerifiedEmail(env, email);
+    if (!verified.ok) {
+      return jsonResponse(
+        { error: verified.error, code: verified.code },
+        verified.status,
+        request,
+        env
+      );
+    }
+
     const parsed = await readJsonBody(request, 8 * 1024);
     if (!parsed.ok) return jsonResponse({ error: parsed.error }, parsed.status, request, env);
     const name = String(parsed.body.name || '').trim().slice(0, 120);
     if (!name) return jsonResponse({ error: 'Project name required' }, 400, request, env);
 
-    const user = await getUser(env, email);
+    const user = verified.user;
     const limits = planLimits(user);
     const countRow = await env.DB.prepare(
       'SELECT COUNT(*) AS c FROM projects WHERE owner_email = ?'
@@ -139,6 +148,15 @@ export async function handleProjectRoutes(
     }
 
     if (request.method === 'PATCH' || request.method === 'PUT') {
+      const verified = await requireVerifiedEmail(env, email);
+      if (!verified.ok) {
+        return jsonResponse(
+          { error: verified.error, code: verified.code },
+          verified.status,
+          request,
+          env
+        );
+      }
       const parsed = await readJsonBody(request, 8 * 1024);
       if (!parsed.ok) return jsonResponse({ error: parsed.error }, parsed.status, request, env);
       const name =
@@ -214,6 +232,15 @@ export async function handleProjectRoutes(
     }
 
     if (request.method === 'DELETE') {
+      const verified = await requireVerifiedEmail(env, email);
+      if (!verified.ok) {
+        return jsonResponse(
+          { error: verified.error, code: verified.code },
+          verified.status,
+          request,
+          env
+        );
+      }
       await env.DB.prepare('DELETE FROM submissions WHERE project_id = ?').bind(id).run();
       await env.DB.prepare('DELETE FROM projects WHERE id = ? AND owner_email = ?')
         .bind(id, email)

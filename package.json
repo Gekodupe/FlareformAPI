@@ -15,9 +15,12 @@
     "deploy": "wrangler deploy",
     "types": "wrangler types",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "db:local": "wrangler d1 execute flareboard --local --file=src/schema.sql",
-    "db:remote": "wrangler d1 execute flareboard --remote --file=src/schema.sql",
-    "db:migrate": "wrangler d1 execute flareboard --local --file=src/schema.sql"
+    "db:schema:local": "wrangler d1 execute flareboard --local --file=src/schema.sql",
+    "db:schema:remote": "wrangler d1 execute flareboard --remote --file=src/schema.sql",
+    "db:migrate": "node scripts/d1-migrate.js",
+    "db:migrate:remote": "node scripts/d1-migrate.js --remote",
+    "db:local": "npm run db:schema:local",
+    "db:remote": "npm run db:schema:remote"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260702.1",
