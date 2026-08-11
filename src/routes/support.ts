@@ -51,7 +51,15 @@ export async function handleSupportRoutes(
     return jsonResponse({ error: 'Too many requests' }, 429, request, env);
   }
 
-  const inbox = env.SUPPORT_INBOX || env.BREVO_SENDER_EMAIL || 'nic@blacnova.net';
+  const inbox = (env.SUPPORT_INBOX || env.BREVO_SENDER_EMAIL || '').trim();
+  if (!inbox) {
+    return jsonResponse(
+      { error: 'Support inbox is not configured on this deployment.' },
+      503,
+      request,
+      env
+    );
+  }
   const topicLabel = TOPICS[topic];
   const html =
     '<div style="font-family:Poppins,Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a">' +
@@ -96,7 +104,7 @@ export async function handleSupportRoutes(
         env
       );
     }
-    return jsonResponse({ error: mailed.error || 'Could not send message' }, 502, request, env);
+    return jsonResponse({ error: 'Could not send message. Try again shortly.' }, 502, request, env);
   }
 
   return jsonResponse(

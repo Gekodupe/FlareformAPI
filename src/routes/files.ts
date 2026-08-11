@@ -45,7 +45,9 @@ export async function handleFileRoutes(
 
   const headers = new Headers(ingestCorsHeaders(request));
   headers.set('Content-Type', meta.contentType || 'application/octet-stream');
-  headers.set('Cache-Control', 'private, max-age=3600');
+  // Token URLs are capability-based (emails); never publicly cache — tokens can leak via caches/Referer.
+  headers.set('Cache-Control', 'private, no-store');
+  headers.set('Referrer-Policy', 'no-referrer');
   headers.set('X-Content-Type-Options', 'nosniff');
   if (meta.name) {
     const safe = String(meta.name).replace(/["\r\n\\]/g, '');

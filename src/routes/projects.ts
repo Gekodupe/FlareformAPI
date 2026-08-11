@@ -1,9 +1,10 @@
-import { requireSession, requireVerifiedEmail, normalizeEmail } from '../lib/auth.ts';
+import { requireSession, requireVerifiedEmail } from '../lib/auth.ts';
 import { jsonResponse } from '../lib/cors.ts';
 import { randomToken } from '../lib/crypto-util.ts';
 import type { Env } from '../lib/env.ts';
 import { planLimits, getUser, userPlan } from '../lib/users.ts';
 import { PLANS } from '../lib/plans.ts';
+import { deleteImagesForPayloads } from '../lib/media.ts';
 import { readJsonBody } from '../lib/validate.ts';
 
 function projectId(): string {
@@ -15,10 +16,8 @@ function notifyFromBody(body: Record<string, unknown>, fallbackEmail: string) {
     body.notifyEnabled === false || body.notify_enabled === false || body.notifyEnabled === 0
       ? 0
       : 1;
-  let notifyEmail = String(body.notifyEmail || body.notify_email || '').trim().slice(0, 254);
-  if (!notifyEmail) notifyEmail = fallbackEmail;
-  const normalized = normalizeEmail(notifyEmail);
-  return { notifyEnabled, notifyEmail: normalized || fallbackEmail };
+  // Notifications only go to the account owner (prevents abuse as an open relay)
+  return { notifyEnabled, notifyEmail: fallbackEmail };
 }
 
 export async function handleProjectRoutes(
@@ -31,6 +30,17 @@ export async function handleProjectRoutes(
   const session = await requireSession(request, env);
   if (!session.ok) return jsonResponse({ error: session.error }, 401, request, env);
   const email = session.email;
+  const browserOnly =
+    request.method !== 'GET' &&
+    (path === '/v1/projects' || /^\/v1\/projects\/[A-Za-z0-9_]+$/.test(path));
+  if (browserOnly && session.via === 'api_key') {
+    return jsonResponse(
+      { error: 'Project changes require a browser session, not an API key' },
+      403,
+      request,
+      env
+    );
+  }
 
   if (path === '/v1/projects' && request.method === 'GET') {
     const url = new URL(request.url);
@@ -241,6 +251,15 @@ export async function handleProjectRoutes(
           env
         );
       }
+      const { results: subs } = await env.DB.prepare(
+        'SELECT payload_json FROM submissions WHERE project_id = ?'
+      )
+        .bind(id)
+        .all<{ payload_json: string }>();
+      await deleteImagesForPayloads(
+        env,
+        (subs || []).map((r) => r.payload_json)
+      );
       await env.DB.prepare('DELETE FROM submissions WHERE project_id = ?').bind(id).run();
       await env.DB.prepare('DELETE FROM projects WHERE id = ? AND owner_email = ?')
         .bind(id, email)

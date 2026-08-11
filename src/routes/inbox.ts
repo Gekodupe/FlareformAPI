@@ -1,6 +1,7 @@
 import { requireSession } from '../lib/auth.ts';
 import { jsonResponse } from '../lib/cors.ts';
 import type { Env } from '../lib/env.ts';
+import { deleteImagesForPayloads } from '../lib/media.ts';
 import { readJsonBody } from '../lib/validate.ts';
 
 function orderClause(sort: string, kind: 'form' | 'log'): string {
@@ -129,13 +130,14 @@ export async function handleInboxRoutes(
   if (match && request.method === 'DELETE') {
     const id = match[1];
     const owned = await env.DB.prepare(
-      `SELECT s.id FROM submissions s
+      `SELECT s.id, s.payload_json FROM submissions s
        JOIN projects p ON p.id = s.project_id
        WHERE s.id = ? AND p.owner_email = ?`
     )
       .bind(id, email)
-      .first();
+      .first<{ id: string; payload_json: string }>();
     if (!owned) return jsonResponse({ error: 'Not found' }, 404, request, env);
+    await deleteImagesForPayloads(env, [owned.payload_json]);
     await env.DB.prepare('DELETE FROM submissions WHERE id = ?').bind(id).run();
     return jsonResponse({ ok: true }, 200, request, env);
   }

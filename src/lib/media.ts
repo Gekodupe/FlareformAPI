@@ -131,10 +131,46 @@ export async function countImagesThisMonth(env: Env, ownerEmail: string): Promis
   return Number((await env.FLAREFORM.get(key)) || '0') || 0;
 }
 
+/** Best-effort atomic-ish increment with retry to reduce overshoot under concurrency. */
 export async function incrementImageQuota(env: Env, ownerEmail: string, n: number): Promise<number> {
   const key = 'imgquota:' + ownerEmail.toLowerCase() + ':' + new Date().toISOString().slice(0, 7);
-  const cur = Number((await env.FLAREFORM.get(key)) || '0') || 0;
-  const next = cur + n;
-  await env.FLAREFORM.put(key, String(next), { expirationTtl: 60 * 60 * 24 * 45 });
+  let next = 0;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const cur = Number((await env.FLAREFORM.get(key)) || '0') || 0;
+    next = cur + n;
+    await env.FLAREFORM.put(key, String(next), { expirationTtl: 60 * 60 * 24 * 45 });
+    const verify = Number((await env.FLAREFORM.get(key)) || '0') || 0;
+    if (verify >= next) return verify;
+  }
   return next;
+}
+
+export async function deleteStoredFile(env: Env, id: string): Promise<void> {
+  if (!id) return;
+  await env.FLAREFORM.delete('file:' + id);
+  await env.FLAREFORM.delete('filemeta:' + id);
+}
+
+/** Collect image ids from submission payload JSON. */
+export function imageIdsFromPayload(payloadJson: string | null | undefined): string[] {
+  try {
+    const payload = JSON.parse(payloadJson || '{}') as { _images?: Array<{ id?: string }> };
+    const imgs = payload && Array.isArray(payload._images) ? payload._images : [];
+    return imgs.map((i) => String(i && i.id ? i.id : '')).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteImagesForPayloads(
+  env: Env,
+  payloads: Array<string | null | undefined>
+): Promise<void> {
+  const ids = new Set<string>();
+  for (const p of payloads) {
+    imageIdsFromPayload(p).forEach((id) => ids.add(id));
+  }
+  for (const id of ids) {
+    await deleteStoredFile(env, id);
+  }
 }

@@ -30,7 +30,8 @@ function isAllowedOrigin(origin: string, extraOrigins?: string[]): boolean {
   const allow = new Set([...(extraOrigins || []), ...DEFAULT_ORIGINS]);
   if (allow.has(origin)) return true;
   if (/^https:\/\/([a-z0-9-]+\.)?flareform\.com$/i.test(origin)) return true;
-  if (/^https:\/\/([a-z0-9-]+\.)?pages\.dev$/i.test(origin)) return true;
+  // Only this product's Pages host (and its preview subdomains), not any *.pages.dev
+  if (/^https:\/\/([a-z0-9-]+\.)?flareform\.pages\.dev$/i.test(origin)) return true;
   return false;
 }
 

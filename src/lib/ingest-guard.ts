@@ -43,7 +43,7 @@ function originMatches(allowed: string[], candidate: string): boolean {
  * When the project has an allowlist:
  * - Browser Origin must match
  * - Missing Origin falls back to Referer origin (some clients)
- * - Neither present → allowed (server-side / curl posts)
+ * - Neither present → denied (prevents curl/bot bypass of allowlists)
  * Empty allowlist → open (documented; set origins in production)
  */
 export function originDenied(
@@ -68,12 +68,13 @@ export function originDenied(
       if (!originMatches(allowed, refOrigin)) {
         return { denied: true, error: 'Origin not allowed' };
       }
+      return { denied: false };
     } catch {
       return { denied: true, error: 'Origin not allowed' };
     }
   }
 
-  return { denied: false };
+  return { denied: true, error: 'Origin required' };
 }
 
 /**

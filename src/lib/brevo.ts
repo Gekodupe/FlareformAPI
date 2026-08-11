@@ -8,8 +8,11 @@ export async function sendBrevoEmail(
     return { ok: false, error: 'Email service not configured' };
   }
 
-  const senderEmail = env.BREVO_SENDER_EMAIL || 'nic@blacnova.net';
-  const senderName = env.BREVO_SENDER_NAME || 'Blacnova Development';
+  const senderEmail = (env.BREVO_SENDER_EMAIL || '').trim();
+  if (!senderEmail) {
+    return { ok: false, error: 'Email sender not configured' };
+  }
+  const senderName = (env.BREVO_SENDER_NAME || 'Flareform').trim() || 'Flareform';
 
   try {
     const res = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -30,10 +33,12 @@ export async function sendBrevoEmail(
 
     const body = (await res.json().catch(() => ({}))) as { messageId?: string; message?: string };
     if (!res.ok) {
-      return { ok: false, error: body.message || 'Email send failed (' + res.status + ')' };
+      console.error('Brevo send failed', res.status, body.message);
+      return { ok: false, error: 'Email send failed' };
     }
     return { ok: true, messageId: body.messageId };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Email send failed' };
+    console.error('Brevo send error', err);
+    return { ok: false, error: 'Email send failed' };
   }
 }

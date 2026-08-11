@@ -96,22 +96,19 @@ export const PLANS: Record<PlanId, PlanInfo> = {
 
 export const PUBLIC_PLAN_IDS: PlanId[] = ['free', 'starter', 'pro'];
 
+/** Price IDs come only from STRIPE_PRICE_IDS env — never hardcode live Stripe prices. */
 export function parsePriceIds(raw: string | undefined): Record<string, string> {
-  const defaults = {
-    free: '',
-    starter: 'price_1U1u6hGrsdJU1djqgYmoylSp',
-    pro: 'price_1U1u6jGrsdJU1djqyssrZ6Od'
-  };
-  if (!raw) return defaults;
+  const empty = { free: '', starter: '', pro: '' };
+  if (!raw) return empty;
   try {
     const obj = JSON.parse(raw) as Record<string, string>;
     return {
-      free: obj.free || defaults.free,
-      starter: obj.starter || defaults.starter,
-      pro: obj.pro || defaults.pro
+      free: String(obj.free || ''),
+      starter: String(obj.starter || ''),
+      pro: String(obj.pro || '')
     };
   } catch {
-    return defaults;
+    return empty;
   }
 }
 

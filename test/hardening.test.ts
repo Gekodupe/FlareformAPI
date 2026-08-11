@@ -61,6 +61,13 @@ describe('ingest-guard', () => {
     assert.equal(originDenied('https://good.com', req).denied, false);
   });
 
+  it('denies when allowlist set but Origin and Referer missing', () => {
+    const req = new Request('https://api.test/f/x', { method: 'POST' });
+    const r = originDenied('https://good.com', req);
+    assert.equal(r.denied, true);
+    if (r.denied) assert.equal(r.error, 'Origin required');
+  });
+
   it('checks Referer when Origin missing', () => {
     const bad = new Request('https://api.test/f/x', {
       headers: { Referer: 'https://evil.com/page' }
@@ -162,5 +169,47 @@ describe('media', () => {
   it('sanitizes file names', () => {
     assert.equal(sanitizeFileName('../../etc/passwd'), 'etc_passwd');
     assert.equal(sanitizeFileName('photo.png'), 'photo.png');
+  });
+});
+
+describe('plans', () => {
+  it('does not hardcode Stripe price ids', async () => {
+    const { parsePriceIds, planFromPriceId } = await import('../src/lib/plans.ts');
+    assert.deepEqual(parsePriceIds(undefined), { free: '', starter: '', pro: '' });
+    assert.deepEqual(parsePriceIds('{bad'), { free: '', starter: '', pro: '' });
+    const map = parsePriceIds(JSON.stringify({ starter: 'price_a', pro: 'price_b' }));
+    assert.equal(map.starter, 'price_a');
+    assert.equal(planFromPriceId('price_b', map), 'pro');
+    assert.equal(planFromPriceId('price_unknown', map), 'free');
+  });
+});
+
+describe('spam local heuristic', () => {
+  it('flags obvious spam phrases', async () => {
+    const { localSpamScore, parseSpamCheckResponse } = await import('../src/lib/geckodupe.ts');
+    const r = localSpamScore({ message: 'Buy cheap viagra now http://a.com http://b.com' });
+    assert.equal(r.isSpam, true);
+    assert.ok(r.score >= 0.7);
+    const nested = parseSpamCheckResponse({
+      score: { score: 0.9, decision: 'reject', fingerprint: 'fp1' }
+    });
+    assert.equal(nested.isSpam, true);
+    assert.equal(nested.fingerprint, 'fp1');
+  });
+});
+
+describe('cors allowlist', () => {
+  it('allows flareform pages hosts but not arbitrary pages.dev', async () => {
+    const { corsHeaders } = await import('../src/lib/cors.ts');
+    const good = new Request('https://api.test/v1/health', {
+      headers: { Origin: 'https://flareform.pages.dev' }
+    });
+    const bad = new Request('https://api.test/v1/health', {
+      headers: { Origin: 'https://evil.pages.dev' }
+    });
+    const goodH = corsHeaders(good) as Record<string, string>;
+    const badH = corsHeaders(bad) as Record<string, string>;
+    assert.equal(goodH['Access-Control-Allow-Origin'], 'https://flareform.pages.dev');
+    assert.equal(badH['Access-Control-Allow-Origin'], undefined);
   });
 });

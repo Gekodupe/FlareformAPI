@@ -81,14 +81,24 @@ export async function handleBillingRoutes(
     const obj = event.data && event.data.object;
 
     if (type === 'checkout.session.completed' && obj) {
+      // Prefer merchant-controlled identity; never trust checkout-entered customer_email first
       const email = String(
-        obj.customer_email || obj.client_reference_id || obj.metadata?.flareform_email || ''
+        obj.metadata?.flareform_email || obj.client_reference_id || obj.customer_email || ''
       )
         .trim()
         .toLowerCase();
       const planMeta = (obj.metadata && obj.metadata.plan) as string | undefined;
-      const plan: PlanId =
+      let plan: PlanId =
         planMeta === 'starter' || planMeta === 'pro' || planMeta === 'free' ? planMeta : 'starter';
+      // Prefer price id when present on the session line items
+      const linePrice =
+        obj.line_items?.data?.[0]?.price?.id ||
+        (Array.isArray(obj.display_items) && obj.display_items[0]?.price?.id) ||
+        '';
+      if (linePrice) {
+        const fromPrice = planFromPriceId(String(linePrice), prices);
+        if (fromPrice === 'starter' || fromPrice === 'pro') plan = fromPrice;
+      }
       if (email) {
         const user = (await getUser(env, email)) || { email, createdAt: Date.now(), projectIds: [] };
         if (obj.customer) {
@@ -147,6 +157,14 @@ export async function handleBillingRoutes(
 
   const session = await requireSession(request, env);
   if (!session.ok) return jsonResponse({ error: session.error }, 401, request, env);
+  if (session.via === 'api_key') {
+    return jsonResponse(
+      { error: 'Billing requires a browser session, not an API key' },
+      403,
+      request,
+      env
+    );
+  }
   const email = session.email;
   let user = (await getUser(env, email)) || {
     email,
@@ -209,7 +227,8 @@ export async function handleBillingRoutes(
     });
 
     if (!sessionRes.ok) {
-      return jsonResponse({ error: sessionRes.error }, sessionRes.status, request, env);
+      console.error('Flareform Stripe checkout failed', sessionRes.error);
+      return jsonResponse({ error: 'Checkout unavailable. Try again shortly.' }, 502, request, env);
     }
     return jsonResponse(
       { ok: true, url: sessionRes.data.url, id: sessionRes.data.id },
@@ -241,7 +260,10 @@ export async function handleBillingRoutes(
       customer: customerId,
       return_url: origin + '/#account'
     });
-    if (!portal.ok) return jsonResponse({ error: portal.error }, portal.status, request, env);
+    if (!portal.ok) {
+      console.error('Flareform Stripe portal failed', portal.error);
+      return jsonResponse({ error: 'Billing portal unavailable. Try again shortly.' }, 502, request, env);
+    }
     return jsonResponse({ ok: true, url: portal.data.url }, 200, request, env);
   }
 

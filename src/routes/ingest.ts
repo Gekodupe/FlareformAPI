@@ -7,6 +7,7 @@ import { sendBrevoEmail } from '../lib/brevo.ts';
 import { scoreWithGeckodupe, dedupeWithGeckodupe } from '../lib/geckodupe.ts';
 import {
   countImagesThisMonth,
+  deleteStoredFile,
   incrementImageQuota,
   isAllowedImageType,
   MAX_IMAGES_PER_SUBMISSION,
@@ -29,6 +30,65 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+type StoredImageForEmail = {
+  url?: string;
+  name?: string;
+  id?: string;
+};
+
+function isImageList(value: unknown): value is StoredImageForEmail[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => item && typeof item === 'object' && ('url' in item || 'id' in item))
+  );
+}
+
+function formatFieldValueHtml(key: string, value: unknown): string {
+  if (key === '_images' || isImageList(value)) {
+    const images = Array.isArray(value) ? (value as StoredImageForEmail[]) : [];
+    const parts = images
+      .map((img) => {
+        const url = String(img && img.url ? img.url : '').trim();
+        if (!url) return '';
+        const name = escapeHtml(String((img && img.name) || 'image'));
+        const safeUrl = escapeHtml(url);
+        return (
+          '<div style="margin:4px 0 10px">' +
+          '<a href="' +
+          safeUrl +
+          '" style="color:#2563eb;font-size:13px">' +
+          name +
+          '</a><br/>' +
+          '<img src="' +
+          safeUrl +
+          '" alt="' +
+          name +
+          '" width="480" style="max-width:100%;height:auto;margin-top:6px;border:0;display:block" />' +
+          '</div>'
+        );
+      })
+      .filter(Boolean);
+    return parts.length ? parts.join('') : '<span style="color:#6b7280">No images</span>';
+  }
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return escapeHtml(JSON.stringify(value));
+  return escapeHtml(String(value));
+}
+
+function formatFieldValueText(key: string, value: unknown): string {
+  if (key === '_images' || isImageList(value)) {
+    const images = Array.isArray(value) ? (value as StoredImageForEmail[]) : [];
+    const urls = images
+      .map((img) => String(img && img.url ? img.url : '').trim())
+      .filter(Boolean);
+    return urls.length ? urls.join('\n  ') : '(no images)';
+  }
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
 async function notifyOwner(
   env: Env,
   project: any,
@@ -44,10 +104,10 @@ async function notifyOwner(
   const rows = Object.keys(fields)
     .map((k) => {
       return (
-        '<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;color:#484848">' +
+        '<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;color:#484848;vertical-align:top">' +
         escapeHtml(k) +
         '</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">' +
-        escapeHtml(String(fields[k])) +
+        formatFieldValueHtml(k, fields[k]) +
         '</td></tr>'
       );
     })
@@ -75,7 +135,7 @@ async function notifyOwner(
     '</div>';
 
   const textLines = Object.keys(fields)
-    .map((k) => k + ': ' + String(fields[k]))
+    .map((k) => k + ': ' + formatFieldValueText(k, fields[k]))
     .join('\n');
 
   await sendBrevoEmail(env, {
@@ -105,7 +165,14 @@ async function parseBody(
       throw err;
     }
     if (!text.trim()) return { fields: {}, files: [] };
-    const parsed = JSON.parse(text);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      const err = new Error('Invalid JSON') as Error & { status: number };
+      err.status = 400;
+      throw err;
+    }
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return { fields: parsed as Record<string, unknown>, files: [] };
     }
@@ -199,10 +266,12 @@ async function checkOrigin(
 async function checkQuota(env: Env, owner: string, request: Request): Promise<Response | null> {
   const user = await getUser(env, owner);
   const limits = planLimits(user);
+  // Spam rows are retained for review but must not burn billable quota
   const monthCount = await env.DB.prepare(
     `SELECT COUNT(*) AS c FROM submissions s
      JOIN projects p ON p.id = s.project_id
-     WHERE p.owner_email = ? AND s.created_at >= datetime('now', '-30 days')`
+     WHERE p.owner_email = ? AND coalesce(s.is_spam, 0) = 0
+       AND s.created_at >= datetime('now', '-30 days')`
   )
     .bind(owner)
     .first<{ c: number }>();
@@ -230,7 +299,8 @@ async function handleFormIngest(
   request: Request,
   env: Env,
   project: any,
-  projectId: string
+  projectId: string,
+  ctx?: ExecutionContext
 ): Promise<Response> {
   const originDenied = await checkOrigin(project, request, env);
   if (originDenied) return originDenied;
@@ -243,13 +313,13 @@ async function handleFormIngest(
     parsedBody = await parseBody(request);
   } catch (e: any) {
     const status = Number(e && e.status) || 400;
-    return jsonResponse(
-      { error: (e && e.message) || 'Invalid body' },
-      status,
-      request,
-      env,
-      ingestCorsHeaders(request)
-    );
+    const msg =
+      status === 413
+        ? 'Payload too large'
+        : status === 400 && e && e.message === 'Invalid JSON'
+          ? 'Invalid JSON'
+          : 'Invalid body';
+    return jsonResponse({ error: msg }, status, request, env, ingestCorsHeaders(request));
   }
   const fields = parsedBody.fields;
 
@@ -279,10 +349,26 @@ async function handleFormIngest(
   const quota = await checkQuota(env, owner, request);
   if (quota) return quota;
 
+  const clean = cleanFields(fields);
+  if (!Object.keys(clean).length && !parsedBody.files.length) {
+    return jsonResponse(
+      { error: 'Empty submission' },
+      400,
+      request,
+      env,
+      ingestCorsHeaders(request)
+    );
+  }
+
+  // Score before storing blobs so spam cannot burn image quota / KV
+  const spam = await scoreWithGeckodupe(env, clean);
+
   const user = await getUser(env, owner);
   const limits = planLimits(user);
-  const imageFiles = parsedBody.files.filter((f) => isAllowedImageType(f.contentType));
-  if (imageFiles.length > MAX_IMAGES_PER_SUBMISSION) {
+  const candidateImages = spam.isSpam
+    ? []
+    : parsedBody.files.filter((f) => isAllowedImageType(f.contentType));
+  if (candidateImages.length > MAX_IMAGES_PER_SUBMISSION) {
     return jsonResponse(
       { error: 'Too many images (max ' + MAX_IMAGES_PER_SUBMISSION + ' per submission)' },
       400,
@@ -291,6 +377,7 @@ async function handleFormIngest(
       ingestCorsHeaders(request)
     );
   }
+  const imageFiles = candidateImages;
   for (const f of imageFiles) {
     if (f.bytes.byteLength > limits.maxImageBytes) {
       return jsonResponse(
@@ -319,7 +406,6 @@ async function handleFormIngest(
     }
   }
 
-  const clean = cleanFields(fields);
   const storedImages: Array<{
     id: string;
     url: string;
@@ -342,7 +428,7 @@ async function handleFormIngest(
       });
     } catch (err: any) {
       return jsonResponse(
-        { error: (err && err.message) || 'Invalid image', name: f.name },
+        { error: 'Invalid image', name: f.name },
         Number(err && err.status) || 400,
         request,
         env,
@@ -361,10 +447,12 @@ async function handleFormIngest(
   }
   if (storedImages.length) {
     clean._images = storedImages;
-    await incrementImageQuota(env, owner, storedImages.length);
   }
 
   if (!Object.keys(clean).length) {
+    for (const img of storedImages) {
+      await deleteStoredFile(env, img.id);
+    }
     return jsonResponse(
       { error: 'Empty submission' },
       400,
@@ -374,39 +462,52 @@ async function handleFormIngest(
     );
   }
 
-  const spam = await scoreWithGeckodupe(env, clean);
   const origin = request.headers.get('Origin') || '';
   const ip = request.headers.get('CF-Connecting-IP') || '';
   const ipHash = ip ? await sha256Hex(ip + ':' + projectId) : null;
   const id = 'sub_' + randomToken(12);
 
-  await env.DB.prepare(
-    `INSERT INTO submissions (id, project_id, payload_json, spam_score, is_spam, kind, fingerprint, occurrence_count, level, ip_hash, origin)
-     VALUES (?, ?, ?, ?, ?, 'form', ?, 1, NULL, ?, ?)`
-  )
-    .bind(
-      id,
-      projectId,
-      JSON.stringify(clean),
-      spam.score,
-      spam.isSpam ? 1 : 0,
-      spam.fingerprint || null,
-      ipHash,
-      origin || null
-    )
-    .run();
-
   try {
-    await notifyOwner(env, project, id, clean, spam);
+    await env.DB.prepare(
+      `INSERT INTO submissions (id, project_id, payload_json, spam_score, is_spam, kind, fingerprint, occurrence_count, level, ip_hash, origin)
+       VALUES (?, ?, ?, ?, ?, 'form', ?, 1, NULL, ?, ?)`
+    )
+      .bind(
+        id,
+        projectId,
+        JSON.stringify(clean),
+        spam.score,
+        spam.isSpam ? 1 : 0,
+        spam.fingerprint || null,
+        ipHash,
+        origin || null
+      )
+      .run();
   } catch (err) {
+    for (const img of storedImages) {
+      await deleteStoredFile(env, img.id);
+    }
+    throw err;
+  }
+
+  if (storedImages.length) {
+    await incrementImageQuota(env, owner, storedImages.length);
+  }
+
+  const notifyPromise = notifyOwner(env, project, id, clean, spam).catch((err) => {
     console.error('Flareform notify failed', err);
+  });
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil(notifyPromise);
+  } else {
+    await notifyPromise;
   }
 
   const next = String(fields._next || fields._redirect || '').trim();
   const wantsHtml =
     (request.headers.get('Accept') || '').includes('text/html') ||
     (request.headers.get('Content-Type') || '').includes('application/x-www-form-urlencoded');
-  if (next && wantsHtml) {
+  if (next && wantsHtml && !spam.isSpam) {
     const safe = safeRedirectUrl(next, {
       allowedOriginsRaw: String(project.allowed_origins || ''),
       requestOrigin: request.headers.get('Origin') || '',
@@ -458,13 +559,13 @@ async function handleLogIngest(
     fields = (await parseBody(request)).fields;
   } catch (e: any) {
     const status = Number(e && e.status) || 400;
-    return jsonResponse(
-      { error: (e && e.message) || 'Invalid body' },
-      status,
-      request,
-      env,
-      ingestCorsHeaders(request)
-    );
+    const msg =
+      status === 413
+        ? 'Payload too large'
+        : status === 400 && e && e.message === 'Invalid JSON'
+          ? 'Invalid JSON'
+          : 'Invalid body';
+    return jsonResponse({ error: msg }, status, request, env, ingestCorsHeaders(request));
   }
 
   const clean = cleanFields(fields);
@@ -578,7 +679,8 @@ async function handleLogIngest(
 export async function handleIngestRoutes(
   request: Request,
   env: Env,
-  path: string
+  path: string,
+  ctx?: ExecutionContext
 ): Promise<Response | null> {
   const formMatch = path.match(/^\/f\/([A-Za-z0-9_]+)$/);
   const logMatch =
@@ -620,5 +722,5 @@ export async function handleIngestRoutes(
   }
 
   if (logMatch) return handleLogIngest(request, env, project, projectId);
-  return handleFormIngest(request, env, project, projectId);
+  return handleFormIngest(request, env, project, projectId, ctx);
 }

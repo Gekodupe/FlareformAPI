@@ -69,7 +69,8 @@ export async function handleAccountRoutes(
     const subRow = await env.DB.prepare(
       `SELECT COUNT(*) AS c FROM submissions s
        JOIN projects p ON p.id = s.project_id
-       WHERE p.owner_email = ? AND s.created_at >= datetime('now', '-30 days')`
+       WHERE p.owner_email = ? AND coalesce(s.is_spam, 0) = 0
+         AND s.created_at >= datetime('now', '-30 days')`
     )
       .bind(email)
       .first<{ c: number }>();
@@ -110,6 +111,14 @@ export async function handleAccountRoutes(
   }
 
   if (path === '/v1/account/keys' && request.method === 'POST') {
+    if (session.via === 'api_key') {
+      return jsonResponse(
+        { error: 'Creating API keys requires a browser session' },
+        403,
+        request,
+        env
+      );
+    }
     const plan = userPlan(user);
     const maxKeys = PLANS[plan].limits.maxKeys;
     if (maxKeys <= 0) {
@@ -187,6 +196,14 @@ export async function handleAccountRoutes(
 
   const delMatch = path.match(/^\/v1\/account\/keys\/([A-Za-z0-9]+)$/);
   if (delMatch && request.method === 'DELETE') {
+    if (session.via === 'api_key') {
+      return jsonResponse(
+        { error: 'Revoking API keys requires a browser session' },
+        403,
+        request,
+        env
+      );
+    }
     const id = delMatch[1];
     if (!(user.keyIds || []).includes(id)) {
       return jsonResponse({ error: 'Not found' }, 404, request, env);

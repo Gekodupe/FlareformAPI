@@ -1,13 +1,22 @@
 import type { Env } from './env.ts';
 
-/** Shared Workers Rate Limiting helper. Fail-open only when unbound (local). */
-export async function rateOk(env: Env, key: string): Promise<boolean> {
-  if (!env.SPAM_RATE_LIMITER) return true;
+/** Shared Workers Rate Limiting. Fail-closed when the binding is present. */
+export async function rateOk(
+  env: Env,
+  key: string,
+  kind: 'default' | 'auth' = 'default'
+): Promise<boolean> {
+  const limiter =
+    kind === 'auth'
+      ? env.AUTH_RATE_LIMITER || env.SPAM_RATE_LIMITER
+      : env.SPAM_RATE_LIMITER;
+  if (!limiter) return true; // unbound local/dev
   try {
-    const r = await env.SPAM_RATE_LIMITER.limit({ key });
+    const r = await limiter.limit({ key });
     return r.success;
-  } catch {
-    return true;
+  } catch (err) {
+    console.error('Flareform rate limit error', err);
+    return false;
   }
 }
 

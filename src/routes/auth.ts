@@ -1,4 +1,10 @@
-import { normalizeEmail, requireSession, extractBearerToken } from '../lib/auth.ts';
+import {
+  normalizeEmail,
+  requireSession,
+  extractBearerToken,
+  revokeSessionsForEmail,
+  revokeApiKeysForUser
+} from '../lib/auth.ts';
 import { sendBrevoEmail } from '../lib/brevo.ts';
 import { randomCode, randomToken } from '../lib/crypto-util.ts';
 import { jsonResponse } from '../lib/cors.ts';
@@ -26,12 +32,31 @@ async function createSession(
 ): Promise<{ sessionId: string; expiresIn: number }> {
   const expiresIn = rememberMe ? SESSION_LONG_SEC : SESSION_SHORT_SEC;
   const sessionId = 'sess_' + randomToken(24);
+  const user = await getUser(env, email);
+  const sessionVersion = Number(user?.sessionVersion || 0);
   await env.FLAREFORM.put(
     'session:' + sessionId,
-    JSON.stringify({ email, exp: Date.now() + expiresIn * 1000, rememberMe: !!rememberMe }),
+    JSON.stringify({
+      email,
+      exp: Date.now() + expiresIn * 1000,
+      rememberMe: !!rememberMe,
+      v: sessionVersion
+    }),
     { expirationTtl: expiresIn }
   );
+  const listKey = 'sessions:' + email;
+  const prev = ((await env.FLAREFORM.get(listKey, 'json')) as string[] | null) || [];
+  const next = [...prev.filter((id) => id && id !== sessionId), sessionId].slice(-40);
+  await env.FLAREFORM.put(listKey, JSON.stringify(next), { expirationTtl: SESSION_LONG_SEC });
   return { sessionId, expiresIn };
+}
+
+async function invalidateCredentialsAfterPasswordChange(env: Env, email: string, user: any): Promise<void> {
+  user.sessionVersion = Number(user.sessionVersion || 0) + 1;
+  await revokeApiKeysForUser(env, user);
+  user.keyIds = [];
+  await putUser(env, user);
+  await revokeSessionsForEmail(env, email);
 }
 
 function ensureUserShape(email: string, existing: any | null): any {
@@ -50,7 +75,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   if (!path.startsWith('/v1/auth/')) return null;
 
   if (path === '/v1/auth/register' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-reg:' + clientIp(request)))) {
+    if (!(await rateOk(env, 'auth-reg:' + clientIp(request), 'auth'))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
     const parsed = await readJsonBody(request, 8 * 1024);
@@ -64,7 +89,29 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
 
     const existing = await getUser(env, email);
     if (existing && existing.passwordHash) {
-      return jsonResponse({ error: 'An account with that email already exists. Sign in instead.' }, 409, request);
+      // Avoid account enumeration: same shape as a soft success, no session issued
+      await sendBrevoEmail(env, {
+        to: email,
+        subject: 'Flareform sign-in reminder',
+        html:
+          '<div style="font-family:Poppins,Arial,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">' +
+          '<p style="color:#f7831e;text-transform:uppercase;letter-spacing:0.08em;font-size:13px">Flareform</p>' +
+          '<h1 style="font-weight:400">You already have an account</h1>' +
+          '<p style="color:#484848">Someone tried to register with this email. If that was you, sign in instead (or reset your password).</p>' +
+          '<p><a href="' +
+          appOrigin(env) +
+          '/#account" style="color:#f7831e">Sign in to Flareform</a></p></div>',
+        text: 'You already have a Flareform account. Sign in at ' + appOrigin(env) + '/#account'
+      }).catch(() => ({ ok: false as const, error: 'send_failed' }));
+      return jsonResponse(
+        {
+          ok: true,
+          message: 'Check your email to continue.',
+          emailSent: true
+        },
+        200,
+        request
+      );
     }
 
     const { salt, hash } = await hashPassword(password);
@@ -119,7 +166,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/login' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-login:' + clientIp(request)))) {
+    if (!(await rateOk(env, 'auth-login:' + clientIp(request), 'auth'))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
     const parsed = await readJsonBody(request, 8 * 1024);
@@ -152,7 +199,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/forgot' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-forgot:' + clientIp(request)))) {
+    if (!(await rateOk(env, 'auth-forgot:' + clientIp(request), 'auth'))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
     const parsed = await readJsonBody(request, 8 * 1024);
@@ -187,6 +234,9 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/reset' && request.method === 'POST') {
+    if (!(await rateOk(env, 'auth-reset:' + clientIp(request), 'auth'))) {
+      return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
+    }
     const parsed = await readJsonBody(request, 8 * 1024);
     if (!parsed.ok) return jsonResponse({ error: parsed.error }, parsed.status, request);
     const token = String(parsed.body.token || '').trim();
@@ -204,12 +254,15 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
     const { salt, hash } = await hashPassword(password);
     user.passwordSalt = salt;
     user.passwordHash = hash;
-    await putUser(env, user);
     await env.FLAREFORM.delete('reset:' + token);
+    await invalidateCredentialsAfterPasswordChange(env, email, user);
     return jsonResponse({ ok: true, message: 'Password updated. You can sign in now.' }, 200, request);
   }
 
   if (path === '/v1/auth/verify-email' && request.method === 'POST') {
+    if (!(await rateOk(env, 'auth-verify-email:' + clientIp(request), 'auth'))) {
+      return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
+    }
     const parsed = await readJsonBody(request, 8 * 1024);
     if (!parsed.ok) return jsonResponse({ error: parsed.error }, parsed.status, request);
     const token = String(parsed.body.token || parsed.body.verify || '').trim();
@@ -227,7 +280,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/start' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-start:' + clientIp(request)))) {
+    if (!(await rateOk(env, 'auth-start:' + clientIp(request), 'auth'))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
 
@@ -236,7 +289,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
     const email = normalizeEmail(String(parsed.body.email || ''));
     if (!email) return jsonResponse({ error: 'Enter a valid email' }, 400, request);
 
-    if (!(await rateOk(env, 'auth-email:' + email))) {
+    if (!(await rateOk(env, 'auth-email:' + email, 'auth'))) {
       return jsonResponse({ error: 'Too many sign-in attempts for this email' }, 429, request);
     }
 
@@ -275,7 +328,8 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
     });
 
     if (!sent.ok) {
-      return jsonResponse({ error: sent.error }, 502, request);
+      console.error('Flareform magic-link email failed', sent.error);
+      return jsonResponse({ error: 'Could not send sign-in email. Try again shortly.' }, 502, request);
     }
 
     return jsonResponse(
@@ -290,7 +344,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   }
 
   if (path === '/v1/auth/verify' && request.method === 'POST') {
-    if (!(await rateOk(env, 'auth-verify:' + clientIp(request)))) {
+    if (!(await rateOk(env, 'auth-verify:' + clientIp(request), 'auth'))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
 
@@ -302,7 +356,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
       .trim()
       .toUpperCase();
     const emailHint = normalizeEmail(String(parsed.body.email || ''));
-    const rememberMe = parsed.body.rememberMe !== false;
+    const rememberMe = parsed.body.rememberMe === true;
 
     if (!token && code && emailHint) {
       token = (await env.FLAREFORM.get('magiccode:' + emailHint + ':' + code)) || '';
@@ -360,7 +414,7 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
   if (path === '/v1/auth/resend-verify' && request.method === 'POST') {
     const session = await requireSession(request, env);
     if (!session.ok) return jsonResponse({ error: session.error }, 401, request);
-    if (!(await rateOk(env, 'auth-resend:' + session.email))) {
+    if (!(await rateOk(env, 'auth-resend:' + session.email, 'auth'))) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429, request);
     }
     const user = ensureUserShape(session.email, await getUser(env, session.email));
@@ -387,11 +441,8 @@ export async function handleAuthRoutes(request: Request, env: Env, path: string)
       text: 'Verify your Flareform email: ' + link
     });
     if (!mailed.ok) {
-      return jsonResponse(
-        { error: mailed.error || 'Could not send verification email. Try again shortly.' },
-        502,
-        request
-      );
+      console.error('Flareform verify-email send failed', mailed.error);
+      return jsonResponse({ error: 'Could not send verification email. Try again shortly.' }, 502, request);
     }
     return jsonResponse({ ok: true, message: 'Verification email sent.', emailSent: true }, 200, request);
   }
